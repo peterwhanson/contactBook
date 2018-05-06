@@ -1,26 +1,21 @@
 package com.peterhanson;
 
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.wicket.Application;
+import org.apache.wicket.RuntimeConfigurationType;
 import org.apache.wicket.markup.html.WebPage;
 import org.apache.wicket.protocol.http.WebApplication;
 
 import redis.clients.jedis.Jedis;
 
-/**
- * Application object for your web application.
- * If you want to run this application without deploying, run the Start class.
- * 
- * @see com.peterhanson.Start#main(String[])
- */
+//The application class
 public class WicketApplication extends WebApplication
 {
 	
-	
-	//Redis Database Structure
+	//The Redis Database Structure:
 	//Contact objects are just objects with 5 strings, the name will be the primary key
 	//A set of all primary keys, the name is stored in the String CONTACT_KEYS_SET_NAME
 	//A hashmap, the name is stored in the String CONTACT_HASHMAP_PREFIX, called "contactsMap" + name, with 5 fields: "name", "address", "phone", "email", "relationship"
@@ -33,13 +28,10 @@ public class WicketApplication extends WebApplication
 	public static final String HASHMAP_FIELDNAME_EMAIL = "email";
 	public static final String HASHMAP_FIELDNAME_RELATIONSHIP = "relationship";
 	
-	public static Jedis jedis = new Jedis("localhost");
-	public static Set<String> contactKeys;
-	public static ArrayList<Contact> contacts;
-	
-	
-	
-	
+	public static Jedis jedis = new Jedis("localhost"); //The interface between java and redis, assumes redis is running on localhost
+	public static Set<String> contactKeys; //A list of all contacts' names, their primary key
+	public static ArrayList<Contact> contacts; //a list of all contacts as model objects
+
 	/**
 	 * @see org.apache.wicket.Application#getHomePage()
 	 */
@@ -56,95 +48,79 @@ public class WicketApplication extends WebApplication
 	public void init()
 	{
 		super.init();
-		
-		this.updateContactKeys();
-		this.populateContacts();
-		
-		
-		
-//		System.out.println(" ");
-//		System.out.println(" ");
-//		System.out.println(value);
-//		System.out.println(" ");
-//		System.out.println(" ");
 
-		// add your configuration here
+		updateContactKeys();
+		populateContacts();
 	}
 	
 
-	
+	//returns contactKeys
 	public static Set<String> getContactKeys(){
-		
 		return contactKeys;
 	}
 	
-	public void updateContactKeys(){
-		
-		this.contactKeys = this.jedis.smembers(CONTACT_KEYS_SET_NAME);
-//		this.populateContacts();
-		
+	//updates contactKeys based on database
+	public static void updateContactKeys(){
+		contactKeys = jedis.smembers(CONTACT_KEYS_SET_NAME);
 	}
 	
-	public void addToContactKeys(String newContactName) {
-		this.jedis.sadd(CONTACT_KEYS_SET_NAME, newContactName);
-		this.updateContactKeys();
+	//adds a contact name
+	public static void addToContactKeys(String newContactName) {
+		jedis.sadd(CONTACT_KEYS_SET_NAME, newContactName);
+		updateContactKeys();
 	}
 	
-	public void removeFromContactKeys(String oldContactName) {
-		this.jedis.srem(CONTACT_KEYS_SET_NAME, oldContactName);
-		this.updateContactKeys();
+	//removes a contact name
+	public static void removeFromContactKeys(String oldContactName) {
+		jedis.srem(CONTACT_KEYS_SET_NAME, oldContactName);
+		updateContactKeys();
 	}
 	
-	public void populateContacts() {
+	//populates the java model object holding the contacts based on the database state
+	public static void populateContacts() {
 		
 		contacts = new ArrayList<Contact>();
 		
 		for(String nameKey: contactKeys) {
-			Map<String, String> contactProperties = this.jedis.hgetAll(CONTACT_HASHMAP_PREFIX + nameKey);
-			Contact contact = new Contact();
-			contact.setName(nameKey);
-			contact.setAddress(contactProperties.get("address"));
-			contact.setPhone(contactProperties.get("phone"));
-			contact.setEmail(contactProperties.get("email"));
-			contact.setRelationship(contactProperties.get("relationship"));
+			Map<String, String> contactProperties = jedis.hgetAll(CONTACT_HASHMAP_PREFIX + nameKey);
+			Contact contact = new Contact(nameKey, contactProperties.get("address"), contactProperties.get("phone"), contactProperties.get("email"), contactProperties.get("relationship"));
 			contacts.add(contact);
 		}
-		
+		HomePage.updateContactNames();	
 	}
 	
-	public void addContact(Contact newContact) {
+	//adds a new contact to the database based on passed contact model
+	public static void addContactToDatabase(Contact newContact) {
+		//the set that keeps track of contacts
+		addToContactKeys(newContact.getName());
 		
-		
-		this.addToContactKeys(newContact.getName());
-		
+		//the string to access the right hashmap
 		String contactHashmapKey = CONTACT_HASHMAP_PREFIX + newContact.getName();
 		
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_NAME, newContact.getName());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_ADDRESS, newContact.getAddress());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_PHONE, newContact.getPhone());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_EMAIL, newContact.getEmail());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_RELATIONSHIP, newContact.getRelationship());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_NAME, newContact.getName());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_ADDRESS, newContact.getAddress());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_PHONE, newContact.getPhone());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_EMAIL, newContact.getEmail());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_RELATIONSHIP, newContact.getRelationship());
 		contacts.add(newContact);
-		
+		HomePage.updateContactNames();
 	}
 	
-	public void removeContact(String oldContactName) {
-		
-		this.removeFromContactKeys(oldContactName);
-		this.jedis.hdel(CONTACT_HASHMAP_PREFIX + oldContactName);
-		this.populateContacts();
-		
+	//removes a contact based on name passed from the database
+	public static void removeContactFromDatabase(String oldContactName) {
+		removeFromContactKeys(oldContactName);
+		jedis.hdel(CONTACT_HASHMAP_PREFIX + oldContactName, HASHMAP_FIELDNAME_NAME, HASHMAP_FIELDNAME_ADDRESS, HASHMAP_FIELDNAME_PHONE, HASHMAP_FIELDNAME_EMAIL, HASHMAP_FIELDNAME_RELATIONSHIP);
+		populateContacts();
 	}
 	
-	public void editContact(Contact updatedContact) {
-		
+	//edits a preexisting contact in the database based on passed contact
+	public static void editContactInDatabase(Contact updatedContact) {
 		String contactHashmapKey = CONTACT_HASHMAP_PREFIX + updatedContact.getName();
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_ADDRESS, updatedContact.getAddress());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_PHONE, updatedContact.getPhone());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_EMAIL, updatedContact.getEmail());
-		this.jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_RELATIONSHIP, updatedContact.getRelationship());
-		this.populateContacts();
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_ADDRESS, updatedContact.getAddress());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_PHONE, updatedContact.getPhone());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_EMAIL, updatedContact.getEmail());
+		jedis.hset(contactHashmapKey, HASHMAP_FIELDNAME_RELATIONSHIP, updatedContact.getRelationship());
+		populateContacts();
 	}
-	
 	
 }
